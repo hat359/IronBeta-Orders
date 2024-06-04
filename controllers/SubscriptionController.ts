@@ -1,74 +1,84 @@
 import { Request, Response } from 'express';
-import Subscription, { ISubscription } from '../models/Subscription';
+import stripe from '../config/stripe';
 
-// Create a new subscription
-export const createSubscription = async (req: Request, res: Response) => {
+
+
+interface StoreItem {
+  name: string;
+  priceInCents: number;
+}
+
+const storeItems: Map<Number, StoreItem> = new Map([
+  [1, { name: 'Item One', priceInCents: 10000000 }],
+  [2, { name: 'Item Two', priceInCents: 20000 }],
+  // Add more items as needed
+]);
+
+export default storeItems;
+
+
+export const createCheckoutSession = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { type, duration, price } = req.body;
-    const newSubscription: ISubscription = new Subscription({ type, duration, price });
-    await newSubscription.save();
-    res.status(201).json(newSubscription);
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'payment',
+      line_items: req.body.map((item: { id: number; quantity: number }) => {
+        const storeItem = storeItems.get(item.id);
+        if (!storeItem) {
+          throw new Error(`Item with ID ${item.id} not found`);
+        }
+        return {
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: storeItem.name,
+            },
+            unit_amount: storeItem.priceInCents,
+          },
+          quantity: item.quantity,
+        };
+      }),
+      success_url: 'https://netflix.com',
+      cancel_url: 'https://apple.com',
+    });
+    console.log(session.url)
+    res.status(200).json({ id: session.id });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create subscription' });
+    console.error('Error creating checkout session:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 };
 
-// Get all subscriptions
-export const getAllSubscriptions = async (req: Request, res: Response) => {
-  try {
-    const subscriptions: ISubscription[] = await Subscription.find();
-    res.json(subscriptions);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch subscriptions' });
-  }
-};
 
-// Get a single subscription by ID
-export const getSubscriptionById = async (req: Request, res: Response) => {
-  try {
-    const subscriptionId: string = req.params.id;
-    const subscription: ISubscription | null = await Subscription.findById(subscriptionId);
-    if (subscription) {
-      res.json(subscription);
-    } else {
-      res.status(404).json({ error: 'Subscription not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch subscription' });
-  }
-};
+    
 
-// Update a subscription by ID
-export const updateSubscription = async (req: Request, res: Response) => {
-  try {
-    const subscriptionId: string = req.params.id;
-    const { type, duration, price } = req.body;
-    const updatedSubscription: ISubscription | null = await Subscription.findByIdAndUpdate(
-      subscriptionId,
-      { type, duration, price },
-      { new: true }
-    );
-    if (updatedSubscription) {
-      res.json(updatedSubscription);
-    } else {
-      res.status(404).json({ error: 'Subscription not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update subscription' });
-  }
-};
 
-// Delete a subscription by ID
-export const deleteSubscription = async (req: Request, res: Response) => {
-  try {
-    const subscriptionId: string = req.params.id;
-    const deletedSubscription: ISubscription | null = await Subscription.findByIdAndDelete(subscriptionId);
-    if (deletedSubscription) {
-      res.json(deletedSubscription);
-    } else {
-      res.status(404).json({ error: 'Subscription not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete subscription' });
+
+
+// export const cancelSubscription = async (req: Request, res: Response): Promise<void> => {
+//   try {
+//     const { subscriptionId } = req.params;
+
+//     // The correct method is stripe.subscriptions.del(subscriptionId)
+//     const deletedSubscription = await stripe.subscriptions.cancel(subscriptionId);
+
+//     res.status(200).json(deletedSubscription);
+//   } catch (error) {
+//     console.error('Error cancelling subscription:', error);
+//     res.status(500).json({ error: 'Internal Server Error' });
+//   }
+// };
+
+
+const getPriceId = (plan: string): string => {
+  switch (plan) {
+    case 'basic':
+      return 'price_1JXXlq2eZvKYlo2C5mpyNaXD';
+    case 'premium':
+      return 'price_1JXXmC2eZvKYlo2CUcVKl0h7';
+    case 'enterprise':
+      return 'price_1JXXmQ2eZvKYlo2CL8gJGkSa';
+    default:
+      throw new Error('Invalid subscription plan');
   }
 };
